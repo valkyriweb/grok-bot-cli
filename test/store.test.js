@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -44,13 +44,32 @@ test("agent root discovery ignores removed sand env aliases", () => {
   }
 });
 
-test("create list delete bots", async () => {
+test("deleting a bot removes it from every group and preserves other records", async () => {
   await withRoot((root) => {
     const a = createAgent(root, { name: "Oncall", description: "pages" });
     assert.equal(a.name, "Oncall");
     assert.equal(listRecords(root).length, 1);
+    const beta = createAgent(root, { name: "Beta" });
+    const gamma = createAgent(root, { name: "Gamma" });
+    const first = createGroup(root, { name: "First", memberIds: [a.id, beta.id] });
+    const second = createGroup(root, { name: "Second", memberIds: [gamma.id, a.id] });
+    const unrelated = createGroup(root, { name: "Unrelated", memberIds: [beta.id, gamma.id] });
+
     deleteAgent(root, "Oncall");
-    assert.equal(listRecords(root).length, 0);
+
+    assert.equal(existsSync(a.path), false);
+    const records = listRecords(root);
+    assert.equal(records.length, 5);
+    assert.equal(records.some((record) => record.id === a.id), false);
+    for (const expected of [
+      beta,
+      gamma,
+      { ...first, memberIds: [beta.id] },
+      { ...second, memberIds: [gamma.id] },
+      unrelated,
+    ]) {
+      assert.deepEqual(records.find((record) => record.id === expected.id), expected);
+    }
   });
 });
 
