@@ -1,5 +1,11 @@
 # grok-bot-cli
 
+## 0.12.6
+
+### Patch Changes
+
+- 01fc37b: Make macOS desktop authentication work without prompting Keychain in background sessions. Read the Safe Storage password from an owner-only file provisioned once from a desktop Terminal.
+
 ## 0.12.5
 
 ### Patch Changes
