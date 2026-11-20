@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -187,22 +187,45 @@ function decryptAppSecret(encrypted, { platform, home, env, getKeychainPassword,
   }
   const prefix = Buffer.from(encrypted, "base64").subarray(0, 3).toString("latin1");
   const password = platform === "linux" && prefix === SAFE_STORAGE_PREFIX_V10
-    ? LINUX_BASIC_TEXT_PASSWORD : getKeychainPassword(platform);
+    ? LINUX_BASIC_TEXT_PASSWORD : getKeychainPassword(platform, home);
   return decryptSafeStorageString(encrypted, password, platform);
 }
 
 
-function readKeychainPassword(platform = process.platform) {
-  if (platform === "linux") {
-    return execFileSync(
-      "secret-tool",
-      ["lookup", "xdg:schema", "chrome_libsecret_os_crypt_password_v2", "application", "Grok Bot"],
-      { encoding: "utf8" },
-    ).trimEnd();
+function readMacSafeStoragePassword(home) {
+  const path = join(home, ".local/state/grok-bot-cli/safe-storage-password");
+  let fd;
+  try {
+    // Don't follow links or block opening a FIFO. Check the opened file before reading it.
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.uid !== process.geteuid() || (stat.mode & 0o777) !== 0o600) {
+      throw new Error("Unsafe credential file");
+    }
+    const password = readFileSync(fd, "utf8").trimEnd();
+    if (!password) throw new Error("Empty credential file");
+    return password;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new GrokBotGatewaySessionError(
+        "MISSING_SAFE_STORAGE_FILE",
+        "Grok Bot Safe Storage password file not found. Follow the macOS setup in the gbot README from a desktop Terminal.",
+      );
+    }
+    throw new GrokBotGatewaySessionError(
+      "UNUSABLE_SAFE_STORAGE_FILE",
+      "Grok Bot Safe Storage password file must be a non-empty, owner-only regular file (mode 0600). Check the macOS setup in the gbot README.",
+    );
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
+}
+
+function readKeychainPassword(platform, home) {
+  if (platform === "darwin") return readMacSafeStoragePassword(home);
   return execFileSync(
-    "/usr/bin/security",
-    ["find-generic-password", "-w", "-s", "Grok Bot Safe Storage"],
+    "secret-tool",
+    ["lookup", "xdg:schema", "chrome_libsecret_os_crypt_password_v2", "application", "Grok Bot"],
     { encoding: "utf8" },
   ).trimEnd();
 }
@@ -279,7 +302,7 @@ export function loadGrokBotAppCredentials({
     if (windowsKey) return decryptWindowsSafeStorageString(encrypted, windowsKey);
     const prefix = Buffer.from(encrypted, "base64").subarray(0, 3).toString("latin1");
     const password = platform === "linux" && prefix === SAFE_STORAGE_PREFIX_V10
-      ? LINUX_BASIC_TEXT_PASSWORD : getKeychainPassword(platform);
+      ? LINUX_BASIC_TEXT_PASSWORD : getKeychainPassword(platform, home);
     return decryptSafeStorageString(encrypted, password, platform);
   };
   const accessToken = decrypt(encryptedToken).trim();
