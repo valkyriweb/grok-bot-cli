@@ -1,6 +1,4 @@
 import crypto from "node:crypto";
-import childProcess from "node:child_process";
-import { syncBuiltinESMExports } from "node:module";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -143,11 +141,14 @@ test("unusable app session without access token surfaces the session error", asy
 });
 
 
-test("missing descriptor connects through active desktop credentials", async t => {
-  if (process.platform !== "darwin") return t.skip("macOS keychain integration fixture");
+test("missing descriptor connects through active desktop credentials without Keychain", async t => {
+  if (process.platform !== "darwin") return t.skip("macOS Safe Storage fixture");
   const home = mkdtempSync(join(tmpdir(), "gbot-reconnect-"));
   const dir = join(home, "Library/Application Support/Grok Bot");
   mkdirSync(dir, { recursive: true });
+  const state = join(home, ".local/state/grok-bot-cli");
+  mkdirSync(state, { recursive: true, mode: 0o700 });
+  writeFileSync(join(state, "safe-storage-password"), "fixture-password\n", { mode: 0o600 });
   const encrypt = value => {
     const key = crypto.pbkdf2Sync("fixture-password", "saltysalt", 1003, 16, "sha1");
     const cipher = crypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, 32));
@@ -159,10 +160,6 @@ test("missing descriptor connects through active desktop credentials", async t =
       inactive: { "cursor-access-token": encrypt("wrong-token") },
     } }),
   }));
-  const originalExec = childProcess.execFileSync;
-  t.mock.method(childProcess, "execFileSync", (file, ...args) => file === "/usr/bin/security" ? "fixture-password" : originalExec(file, ...args));
-  syncBuiltinESMExports();
-  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   let calls = 0;
   t.mock.method(globalThis, "fetch", async (url, options) => {
     calls++;

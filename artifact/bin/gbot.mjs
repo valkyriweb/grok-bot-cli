@@ -44426,26 +44426,38 @@ var __webpack_modules__ = {
                 return decryptWindowsSafeStorageString(encrypted, readWindowsSafeStorageKey(home, env, unprotectData));
             }
             const prefix = Buffer.from(encrypted, "base64").subarray(0, 3).toString("latin1");
-            const password = platform === "linux" && prefix === SAFE_STORAGE_PREFIX_V10 ? LINUX_BASIC_TEXT_PASSWORD : getKeychainPassword(platform);
+            const password = platform === "linux" && prefix === SAFE_STORAGE_PREFIX_V10 ? LINUX_BASIC_TEXT_PASSWORD : getKeychainPassword(platform, home);
             return decryptSafeStorageString(encrypted, password, platform);
         }
-        function readKeychainPassword(platform = process.platform) {
-            if (platform === "linux") {
-                return (0, node_child_process__rspack_import_1.execFileSync)("secret-tool", [
-                    "lookup",
-                    "xdg:schema",
-                    "chrome_libsecret_os_crypt_password_v2",
-                    "application",
-                    "Grok Bot"
-                ], {
-                    encoding: "utf8"
-                }).trimEnd();
+        function readMacSafeStoragePassword(home) {
+            const path = (0, node_path__rspack_import_4.join)(home, ".local/state/grok-bot-cli/safe-storage-password");
+            let fd;
+            try {
+                fd = (0, node_fs__rspack_import_2.openSync)(path, node_fs__rspack_import_2.constants.O_RDONLY | node_fs__rspack_import_2.constants.O_NOFOLLOW | node_fs__rspack_import_2.constants.O_NONBLOCK);
+                const stat = (0, node_fs__rspack_import_2.fstatSync)(fd);
+                if (!stat.isFile() || stat.uid !== process.geteuid() || (stat.mode & 511) !== 384) {
+                    throw new Error("Unsafe credential file");
+                }
+                const password = (0, node_fs__rspack_import_2.readFileSync)(fd, "utf8").trimEnd();
+                if (!password) throw new Error("Empty credential file");
+                return password;
+            } catch (error) {
+                if (error.code === "ENOENT") {
+                    throw new GrokBotGatewaySessionError("MISSING_SAFE_STORAGE_FILE", "Grok Bot Safe Storage password file not found. Follow the macOS setup in the gbot README from a desktop Terminal.");
+                }
+                throw new GrokBotGatewaySessionError("UNUSABLE_SAFE_STORAGE_FILE", "Grok Bot Safe Storage password file must be a non-empty, owner-only regular file (mode 0600). Check the macOS setup in the gbot README.");
+            } finally{
+                if (fd !== undefined) (0, node_fs__rspack_import_2.closeSync)(fd);
             }
-            return (0, node_child_process__rspack_import_1.execFileSync)("/usr/bin/security", [
-                "find-generic-password",
-                "-w",
-                "-s",
-                "Grok Bot Safe Storage"
+        }
+        function readKeychainPassword(platform, home) {
+            if (platform === "darwin") return readMacSafeStoragePassword(home);
+            return (0, node_child_process__rspack_import_1.execFileSync)("secret-tool", [
+                "lookup",
+                "xdg:schema",
+                "chrome_libsecret_os_crypt_password_v2",
+                "application",
+                "Grok Bot"
             ], {
                 encoding: "utf8"
             }).trimEnd();
@@ -44515,7 +44527,7 @@ var __webpack_modules__ = {
             const decrypt = (encrypted)=>{
                 if (windowsKey) return decryptWindowsSafeStorageString(encrypted, windowsKey);
                 const prefix = Buffer.from(encrypted, "base64").subarray(0, 3).toString("latin1");
-                const password = platform === "linux" && prefix === SAFE_STORAGE_PREFIX_V10 ? LINUX_BASIC_TEXT_PASSWORD : getKeychainPassword(platform);
+                const password = platform === "linux" && prefix === SAFE_STORAGE_PREFIX_V10 ? LINUX_BASIC_TEXT_PASSWORD : getKeychainPassword(platform, home);
                 return decryptSafeStorageString(encrypted, password, platform);
             };
             const accessToken = decrypt(encryptedToken).trim();

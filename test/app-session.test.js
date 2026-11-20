@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -95,6 +95,33 @@ test("loads the signed-in Grok Bot gateway without manual tokens", () => {
     gatewayToken: "gateway-token",
     headers: { "x-anyrun-network-token": "route-token" },
   });
+});
+
+test("macOS desktop session reads only a private, nonempty Safe Storage file", (t) => {
+  if (process.platform === "win32") return t.skip("requires POSIX file permissions");
+  const home = writeWrappedDescriptor({ version: 1, encrypted: ENCRYPTED_DESCRIPTOR });
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const options = { platform: "darwin", home };
+  const status = () => inspectGrokBotGatewaySession(options);
+  assert.equal(status().code, "MISSING_SAFE_STORAGE_FILE");
+
+  const path = join(home, ".local/state/grok-bot-cli/safe-storage-password");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, "", { mode: 0o600 });
+  assert.equal(status().code, "UNUSABLE_SAFE_STORAGE_FILE");
+
+  writeFileSync(path, "demo-password\n");
+  chmodSync(path, 0o644);
+  assert.equal(status().code, "UNUSABLE_SAFE_STORAGE_FILE");
+
+  chmodSync(path, 0o600);
+  assert.equal(loadGrokBotGatewaySession(options).gatewayToken, "gateway-token");
+
+  rmSync(path);
+  const target = join(dirname(path), "target");
+  writeFileSync(target, "demo-password", { mode: 0o600 });
+  symlinkSync(target, path);
+  assert.equal(status().code, "UNUSABLE_SAFE_STORAGE_FILE");
 });
 
 for (const version of [2, 3]) {

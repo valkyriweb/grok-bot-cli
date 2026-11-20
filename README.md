@@ -14,7 +14,38 @@ Manage [Grok Bot](https://cursor.com/help/grok-bot/plans) agents, groups, and me
 npm install --global grok-bot-cli
 ```
 
-Requires Node.js 22.19.0+ and the Grok Bot desktop app on macOS, Linux, or Windows. Open Grok Bot and sign in once; `gbot` automatically uses the app's encrypted session and routing credentials. No token copying is required. If the app removes its cached gateway route while the cloud computer sleeps, the CLI uses the active account in `sand-secrets.json` to request a fresh route through `EnsureSandBox`. Signed-out and inactive saved accounts are never selected. Backend requests use the installed Grok Bot app version, read from the app's `desktop-status.json` (or the macOS app bundle); `SAND_CLIENT_VERSION` remains an explicit override. On Linux the app keeps its session under `~/.config/Grok Bot` (or `$XDG_CONFIG_HOME`); when it is stored in the system keyring, `gbot` reads the key with `secret-tool` (package `libsecret-tools`). On Windows the session lives under `%APPDATA%\\Grok Bot` and decrypts with the app's DPAPI-wrapped Safe Storage key.
+Requires Node.js 22.19.0+ and the Grok Bot desktop app on macOS, Linux, or Windows. Open Grok Bot and sign in once. `gbot` uses the app's encrypted session and routing credentials. On macOS, set up Safe Storage once as shown below. If the app removes its cached gateway route while the cloud computer sleeps, the CLI uses the active account in `sand-secrets.json` to request a fresh route through `EnsureSandBox`. Signed-out and inactive saved accounts are never selected. Backend requests use the installed Grok Bot app version, read from the app's `desktop-status.json` (or the macOS app bundle); `SAND_CLIENT_VERSION` remains an explicit override. On Linux the app keeps its session under `~/.config/Grok Bot` (or `$XDG_CONFIG_HOME`); when it is stored in the system keyring, `gbot` reads the key with `secret-tool` (package `libsecret-tools`). On Windows the session lives under `%APPDATA%\\Grok Bot` and decrypts with the app's DPAPI-wrapped Safe Storage key.
+
+### macOS Safe Storage setup
+
+`gbot` does not ask Keychain for the app’s Safe Storage password. To use your
+desktop session from any terminal, including SSH and background jobs, run this
+once in a desktop Terminal on the Mac. If macOS asks, allow the read.
+
+```sh
+(
+  set -eu
+  umask 077
+  dir="$HOME/.local/state/grok-bot-cli"
+  mkdir -p "$dir"
+  chmod 700 "$dir"
+  file="$dir/safe-storage-password"
+  if [ -e "$file" ] || [ -L "$file" ]; then
+    printf "%s\n" "Safe Storage file already exists: $file" >&2
+    exit 1
+  fi
+  temp=$(mktemp "$dir/.safe-storage.XXXXXX")
+  trap 'rm -f "$temp"' EXIT
+  /usr/bin/security find-generic-password -w -s "Grok Bot Safe Storage" > "$temp"
+  test -s "$temp"
+  ln -h "$temp" "$file"
+)
+```
+
+Keep this directory private. The file contains the password needed to decrypt
+the app session, so do not copy it to another machine or include it in backups
+or logs. If the app replaces its Safe Storage password, remove only that file
+and repeat the setup. Use `gbot doctor` to check whether the session is usable.
 
 ## Use
 
